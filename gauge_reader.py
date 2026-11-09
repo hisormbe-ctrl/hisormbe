@@ -11,7 +11,7 @@ reader = GaugeReader(
     model_path="7seg_svm_model.joblib",
 )
 
-reader.select_roi()
+reader.select_rois()   # 左の桁から順に4桁分のROIを設定
 value = reader.read_value()
 reader.close()
 """
@@ -25,8 +25,25 @@ import joblib
 import numpy as np
 
 
-CAM_ID = 1
-N_DIGITS = 3
+def find_camera_id(max_devices=10):
+    for camera_id in range(max_devices):
+        cap = cv2.VideoCapture(camera_id, cv2.CAP_DSHOW)
+        try:
+            if not cap.isOpened():
+                continue
+
+            ok, frame = cap.read()
+            if ok and frame is not None:
+                return camera_id
+        finally:
+            cap.release()
+
+# dont want to termiante.
+    # raise RuntimeError("使用可能なカメラが見つかりません。")
+    return None
+
+
+N_DIGITS = 4
 MODEL_PATH = "7seg_svm_model.joblib"
 
 IMG_W = 32
@@ -100,47 +117,15 @@ def extract_feature(img):
     return np.concatenate([hog_feat, pix_feat])
 
 
-def split_digits(display_roi, n_digits=N_DIGITS):
-    """表示器ROIを横方向へ桁数分割する。"""
-
-    if display_roi is None or display_roi.size == 0:
-        raise ValueError("表示器ROIが空です。")
-
-    h, w = display_roi.shape[:2]
-    boxes = []
-
-    for index in range(n_digits):
-        x1 = int(round(index * w / n_digits))
-        x2 = int(round((index + 1) * w / n_digits))
-
-        x1p = max(0, x1 - PAD_X)
-        x2p = min(w, x2 + PAD_X)
-        y1p = 0
-        y2p = h
-
-        boxes.append((x1p, y1p, x2p, y2p))
-
-    return boxes
-
-
-def predict_display(
-    model,
-    display_roi,
-    n_digits=N_DIGITS,
-):
-    boxes = split_digits(display_roi, n_digits)
+def predict_digits(model, crops):
+    """桁ごとに切り出した画像のリストを認識する。"""
 
     features = []
-    crops = []
     preprocessed = []
 
-    for x1, y1, x2, y2 in boxes:
-        crop = display_roi[y1:y2, x1:x2]
-
-        if crop.size == 0:
+    for crop in crops:
+        if crop is None or crop.size == 0:
             raise ValueError("桁画像の切り出しに失敗しました。")
-
-        crops.append(crop)
 
         proc = preprocess_image(crop)
         preprocessed.append(proc)
@@ -161,7 +146,7 @@ def predict_display(
     labels = [str(value) for value in labels]
     confidences = [float(value) for value in confidences]
 
-    return labels, confidences, boxes, crops, preprocessed
+    return labels, confidences, preprocessed
 
 
 def majority_vote(history):
@@ -176,7 +161,7 @@ class GaugeReader:
 
     def __init__(
         self,
-        cam_id=CAM_ID,
+        cam_id,
         model_path=MODEL_PATH,
         n_digits=N_DIGITS,
         smooth_window=SMOOTH_WINDOW,
@@ -195,13 +180,15 @@ class GaugeReader:
         self.model = None
         self.class_names = None
         self.cap = None
-        self.roi = None
+        # 桁ごとのROI。左の桁から順に (x, y, width, height)。
+        self.rois = [None] * self.n_digits
         self.last_value = None
         self.preview_history = deque(maxlen=self.smooth_window)
 
     @property
     def has_roi(self):
-        return self.roi is not None
+        """全桁のROIが設定済みならTrue。"""
+        return all(roi is not None for roi in self.rois)
 
     @property
     def is_camera_open(self):
@@ -234,7 +221,10 @@ class GaugeReader:
         """カメラを必要時に1回だけ開く。"""
 
         if self.is_camera_open:
-            return
+            return True
+
+        if self.cam_id is None:
+            return False
 
         self.cap = cv2.VideoCapture(
             self.cam_id,
@@ -244,9 +234,8 @@ class GaugeReader:
         if not self.cap.isOpened():
             self.cap.release()
             self.cap = None
-            raise RuntimeError(
-                f"カメラを開けませんでした: CAM_ID={self.cam_id}"
-            )
+            print(f"カメラを開けませんでした: CAM_ID={self.cam_id}")
+            return False
 
         self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
         self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
@@ -261,51 +250,112 @@ class GaugeReader:
         for _ in range(5):
             self.cap.read()
 
-    def select_roi(self):
-        """カメラ画像を表示し、表示器全体のROIを設定する。"""
+        return True
+
+    def select_rois(self):
+        """
+        カメラ画像を表示し、左の桁から順に1桁ずつROIを設定する。
+
+        各桁で、マウスドラッグ → Enter/Spaceで確定、
+        cまたはEscでキャンセル（全体を中止し、既存ROIは維持）。
+        戻り値は [(x, y, w, h), ...]。
+        """
 
         self.load_model()
         self.open_camera()
 
         ok, frame = self.cap.read()
-        if not ok:
+        if not ok or frame is None:
             raise RuntimeError("ROI設定用フレームの取得に失敗しました。")
 
-        selected = cv2.selectROI(
-            "Select Display ROI",
-            frame,
-            showCrosshair=True,
-            fromCenter=False,
-        )
-        cv2.destroyWindow("Select Display ROI")
+        window_name = "Select Digit ROI"
+        new_rois = []
 
-        x, y, width, height = (
-            int(value) for value in selected
-        )
+        try:
+            for index in range(self.n_digits):
+                guide = frame.copy()
 
-        if width <= 0 or height <= 0:
-            raise RuntimeError("ROI設定がキャンセルされました。")
+                # 設定済みの桁を描画して、位置関係を分かりやすくする
+                for done_index, done in enumerate(new_rois):
+                    dx, dy, dw, dh = done
+                    cv2.rectangle(
+                        guide,
+                        (dx, dy),
+                        (dx + dw, dy + dh),
+                        (0, 255, 0),
+                        2,
+                    )
+                    cv2.putText(
+                        guide,
+                        str(done_index + 1),
+                        (dx, max(dy - 6, 20)),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.7,
+                        (0, 255, 0),
+                        2,
+                        cv2.LINE_AA,
+                    )
 
-        self.roi = (x, y, width, height)
+                cv2.putText(
+                    guide,
+                    f"Digit {index + 1}/{self.n_digits} (from left)",
+                    (30, 50),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    1.0,
+                    (0, 255, 255),
+                    2,
+                    cv2.LINE_AA,
+                )
+
+                selected = cv2.selectROI(
+                    window_name,
+                    guide,
+                    showCrosshair=True,
+                    fromCenter=False,
+                )
+
+                x, y, width, height = (
+                    int(value) for value in selected
+                )
+
+                if width <= 0 or height <= 0:
+                    raise RuntimeError(
+                        f"{index + 1}桁目のROI設定がキャンセルされました。"
+                    )
+
+                new_rois.append((x, y, width, height))
+        finally:
+            cv2.destroyWindow(window_name)
+
+        self.rois = new_rois
         self.last_value = None
         self.preview_history.clear()
 
-        return self.roi
+        return list(self.rois)
 
-    def set_roi(self, roi):
+    def set_rois(self, rois):
         """保存済みROIなどを外部から設定する。"""
 
-        if roi is None or len(roi) != 4:
-            raise ValueError("ROIは(x, y, width, height)で指定してください。")
+        if rois is None or len(rois) != self.n_digits:
+            raise ValueError(
+                f"ROIは{self.n_digits}個の(x, y, width, height)で指定してください。"
+            )
 
-        x, y, width, height = (
-            int(value) for value in roi
-        )
+        checked = []
+        for roi in rois:
+            if roi is None or len(roi) != 4:
+                raise ValueError(
+                    "各ROIは(x, y, width, height)で指定してください。"
+                )
 
-        if width <= 0 or height <= 0:
-            raise ValueError("ROIの幅と高さは正の値が必要です。")
+            x, y, width, height = (int(value) for value in roi)
 
-        self.roi = (x, y, width, height)
+            if width <= 0 or height <= 0:
+                raise ValueError("ROIの幅と高さは正の値が必要です。")
+
+            checked.append((x, y, width, height))
+
+        self.rois = checked
         self.last_value = None
         self.preview_history.clear()
 
@@ -318,44 +368,78 @@ class GaugeReader:
 
         return frame
 
-    def _crop_display_roi(self, frame):
-        if self.roi is None:
-            raise RuntimeError("ROIが未設定です。先にSET ROIを実行してください。")
+    def _crop_digit_rois(self, frame):
+        """桁ごとのROIでフレームを切り出し、画像のリストを返す。"""
 
-        x, y, width, height = self.roi
+        if not self.has_roi:
+            raise RuntimeError("ROIが未設定です。先にROI設定を実行してください。")
+
         frame_height, frame_width = frame.shape[:2]
+        crops = []
 
-        if (
-            x < 0
-            or y < 0
-            or x + width > frame_width
-            or y + height > frame_height
-        ):
-            raise RuntimeError(
-                "ROIが現在のカメラ画像範囲から外れています。"
-            )
+        for index, (x, y, width, height) in enumerate(self.rois):
+            if (
+                x < 0
+                or y < 0
+                or x + width > frame_width
+                or y + height > frame_height
+            ):
+                raise RuntimeError(
+                    f"{index + 1}桁目のROIが現在のカメラ画像範囲から外れています。"
+                )
 
-        display_roi = frame[
-            y:y + height,
-            x:x + width,
+            crop = frame[
+                y:y + height,
+                x:x + width,
+            ]
+
+            if crop.size == 0:
+                raise RuntimeError(
+                    f"{index + 1}桁目のROI画像の切り出しに失敗しました。"
+                )
+
+            crops.append(crop)
+
+        return crops
+
+    def analyze_frame(self, frame):
+        """
+        すでに取得済みのフレームを認識する（カメラからは読まない）。
+
+        GUIのタイマーが読んだフレームを使い回すためのメソッド。
+        戻り値は (labels, confidences, stable_text)。
+        labelsは信頼度が閾値未満の桁を "?" にした文字のリスト。
+        stable_textは直近smooth_window回の多数決結果。
+        """
+
+        self.load_model()
+        crops = self._crop_digit_rois(frame)
+
+        labels, confidences, _ = predict_digits(
+            self.model,
+            crops,
+        )
+
+        shown = [
+            label if confidence >= self.confidence_threshold else "?"
+            for label, confidence in zip(labels, confidences)
         ]
 
-        if display_roi.size == 0:
-            raise RuntimeError("ROI画像の切り出しに失敗しました。")
+        self.preview_history.append("".join(shown))
+        stable_text = majority_vote(self.preview_history)
 
-        return display_roi
+        return shown, confidences, stable_text
 
     def read_once(self):
         """1フレームを認識し、認識文字列を返す。"""
 
         self.load_model()
         frame = self._read_frame()
-        display_roi = self._crop_display_roi(frame)
+        crops = self._crop_digit_rois(frame)
 
-        labels, confidences, _, _, _ = predict_display(
+        labels, confidences, _ = predict_digits(
             self.model,
-            display_roi,
-            n_digits=self.n_digits,
+            crops,
         )
 
         text_chars = []
@@ -380,7 +464,7 @@ class GaugeReader:
         frame = self._read_frame()
         display = frame.copy()
 
-        if self.roi is None:
+        if not self.has_roi:
             cv2.putText(
                 display,
                 "ROI NOT SET",
@@ -393,11 +477,10 @@ class GaugeReader:
             )
             return display, ""
 
-        display_roi = self._crop_display_roi(frame)
-        labels, confidences, boxes, _, _ = predict_display(
+        crops = self._crop_digit_rois(frame)
+        labels, confidences, _ = predict_digits(
             self.model,
-            display_roi,
-            n_digits=self.n_digits,
+            crops,
         )
 
         raw_chars = []
@@ -411,25 +494,16 @@ class GaugeReader:
         self.preview_history.append(raw_text)
         stable_text = majority_vote(self.preview_history)
 
-        x, y, width, height = self.roi
-        cv2.rectangle(
-            display,
-            (x, y),
-            (x + width, y + height),
-            (0, 255, 255),
-            2,
-        )
-
-        for box, label, confidence in zip(
-            boxes,
+        for roi, label, confidence in zip(
+            self.rois,
             labels,
             confidences,
         ):
-            x1, y1, x2, y2 = box
-            gx1 = x + x1
-            gy1 = y + y1
-            gx2 = x + x2
-            gy2 = y + y2
+            x, y, width, height = roi
+            gx1 = x
+            gy1 = y
+            gx2 = x + width
+            gy2 = y + height
 
             if confidence >= self.confidence_threshold:
                 shown_label = label
@@ -528,48 +602,14 @@ class GaugeReader:
         cv2.destroyAllWindows()
 
 
-    def save_snapshot(self, filename, roi_only=False):
-        """
-        2026.10.1追加
-        
-        カメラ画像をファイルに保存する。
-
-        roi_only=Trueの場合は表示器ROIだけを保存する。
-        """
-
-        frame = self._read_frame()
-
-        if roi_only:
-            frame = self._crop_display_roi(frame)
-
-        path = Path(filename)
-
-        # 保存先フォルダがなければ作成
-        path.parent.mkdir(
-            parents=True,
-            exist_ok=True,
-        )
-
-        success = cv2.imwrite(
-            str(path),
-            frame,
-        )
-
-        if not success:
-            raise RuntimeError(
-                f"画像保存に失敗しました: {path}"
-            )
-
-        return path
-
 def main():
     """このファイル単独でROI設定と1回読取りを試す。"""
 
-    reader = GaugeReader()
+    reader = GaugeReader(cam_id=find_camera_id())
 
     try:
-        roi = reader.select_roi()
-        print("ROI:", roi)
+        rois = reader.select_rois()
+        print("ROIs:", rois)
 
         while True:
             value = reader.read_value()
@@ -583,7 +623,7 @@ def main():
                 break
 
             if command == "r":
-                print("ROI:", reader.select_roi())
+                print("ROIs:", reader.select_rois())
 
     finally:
         reader.close()
