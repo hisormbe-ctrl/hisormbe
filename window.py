@@ -314,6 +314,37 @@ class MainWindow(QMainWindow):
             time_column="timestamp",
         )
 
+    def request_vacuum(self):
+        # 未接続のときは送らない (ERRORログが毎回出るのを防ぐ)
+        if not comm.is_serial_connected(self):
+            return
+
+        comm.send_command(self, "VAC")
+
+
+    def start_vacuum_cycle(self, interval_text):
+        """入力された秒数の間隔で VAC 送信を開始する。"""
+
+        interval_ms = int(float(interval_text) * 1000)
+
+        if interval_ms <= 0:
+            raise ValueError("時間間隔は0秒より大きくしてください。")
+
+        self.plot_timer.stop()
+        self.plot_timer.start(interval_ms)
+
+        # ON直後に1回測定し、以降は interval ごとに測定
+        self.request_vacuum()
+
+        self.vac_cycle_status.setText(f"ON ({interval_ms // 1000} s)")
+
+
+    def stop_vacuum_cycle(self):
+        """VAC 送信サイクルを停止する。"""
+
+        self.plot_timer.stop()
+        self.vac_cycle_status.setText("OFF")
+
 # added for vac.
     def create_vacuum_tab(self):
 
@@ -323,12 +354,44 @@ class MainWindow(QMainWindow):
         label1 = QLabel("真空計則")
         layout.addWidget(label1)
 
+# ON/OFF and interval (メインタブと同じ構成)
+        self.vac_on_button = QPushButton("ON")
+        self.vac_off_button = QPushButton("OFF")
+        self.vac_intervaltime = QLineEdit()
+        self.vac_intervaltime.setText("1")
+        self.vac_time_notice = QLabel("秒（1~600）")
+        vac_validator = QIntValidator(1, 600, self.vac_intervaltime)
+        self.vac_intervaltime.setValidator(vac_validator)
+        self.vac_cycle_status = QLabel("OFF")
+        hbox1 = QHBoxLayout()
+        hbox1.addWidget(self.vac_on_button,1)
+        hbox1.addWidget(self.vac_off_button,1)
+        hbox1.addWidget(self.vac_intervaltime,1)
+        hbox1.addWidget(self.vac_time_notice,1)
+        hbox1.addWidget(self.vac_cycle_status,1)
+        layout.addLayout(hbox1)
+
+        self.vac_on_button.clicked.connect(
+            lambda checked: (
+                self.start_vacuum_cycle(self.vac_intervaltime.text())
+                if self.vac_intervaltime.hasAcceptableInput()
+                else None
+            )
+        )
+
+        self.vac_off_button.clicked.connect(self.stop_vacuum_cycle)
+
 # plot.
         self.vac_graph = plotter.create_graph("Vacuum", "Pa")
         layout.addWidget(self.vac_graph)
         # 圧力は桁が大きく変わるので対数軸
         self.vac_graph.setLogMode(y=True)
-# graph update: VacLogに1行記録されるたびに再描画
+# graph update
+        # ON押下で入力秒数ごとにPicoへ VAC を送る (OFFで停止)。
+        # 応答 DATA VAC が VacLog に記録されたらグラフを再描画する。
+        self.plot_timer = QTimer(self)
+        self.plot_timer.timeout.connect(self.request_vacuum)
+
         self.logs.vac_log.csv_written.connect(
             lambda row: self.update_graph()
         )
