@@ -156,7 +156,7 @@ class VacLog(CsvLog):
     ):
         super().__init__(
             file_name=file_name,
-            columns=["timestamp", "voltage", "vacuum"],
+            columns=["timestamp", "raw", "voltage", "gauge_v", "pressure"],
             output_directory=output_directory,
             parent=parent,
         )
@@ -189,6 +189,47 @@ def parse_temp_rx(message):
         return None
 
 
+# Picoの真空応答:
+#   "DATA VAC raw=500.0 voltage=1.5000 gauge_v=7.439 pressure=4.39e-04"
+#   フィラメントOFF時は pressure=OFF
+VAC_RX_PATTERN = re.compile(
+    r"^DATA\s+VAC\s+"
+    r"raw=(?P<raw>\S+)\s+"
+    r"voltage=(?P<voltage>\S+)\s+"
+    r"gauge_v=(?P<gauge_v>\S+)\s+"
+    r"pressure=(?P<pressure>\S+)"
+)
+
+
+def parse_vac_rx(message):
+    """真空応答行を (raw, voltage, gauge_v, pressure) で返す。該当しなければNone。
+
+    raw, voltage, gauge_v は float。
+    pressure は float、フィラメントOFF時は None。
+    """
+
+    match = VAC_RX_PATTERN.match(str(message).strip())
+
+    if match is None:
+        return None
+
+    try:
+        raw = float(match.group("raw"))
+        voltage = float(match.group("voltage"))
+        gauge_v = float(match.group("gauge_v"))
+
+        pressure_text = match.group("pressure")
+        if pressure_text.upper() == "OFF":
+            pressure = None
+        else:
+            pressure = float(pressure_text)
+
+    except ValueError:
+        return None
+
+    return raw, voltage, gauge_v, pressure
+
+
 class LogManager(QObject):
     csv_written = Signal(list)
 
@@ -219,6 +260,19 @@ class LogManager(QObject):
                     timestamp=row[0],
                 )
 
+            # 真空データのRXは、同じタイムスタンプでVacLogにも記録する。
+            vac_values = parse_vac_rx(message)
+
+            if vac_values is not None:
+                raw, voltage, gauge_v, pressure = vac_values
+                self.vac_log.write_row(
+                    f"{raw:.1f}",
+                    f"{voltage:.4f}",
+                    f"{gauge_v:.3f}",
+                    "OFF" if pressure is None else f"{pressure:.2e}",
+                    timestamp=row[0],
+                )
+
         return row
 
     def close(self):
@@ -236,6 +290,13 @@ if __name__ == "__main__":
         logs.record_log(
             "RX", "DATA TEMP raw=123.0 voltage=0.2460 temp_c=24.60"
         )
-        logs.vac_log.write_row("1.0", "1.0e-6")
+        logs.record_log(
+            "RX",
+            "DATA VAC raw=500.0 voltage=1.5000 gauge_v=7.439 pressure=4.39e-04",
+        )
+        logs.record_log(
+            "RX",
+            "DATA VAC raw=1500.0 voltage=4.5000 gauge_v=21.773 pressure=OFF",
+        )
     finally:
         logs.close()

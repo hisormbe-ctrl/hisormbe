@@ -8,6 +8,8 @@
 #   PULSE 1500
 #   STATUS
 #   PING
+#   TEMP (READ)
+#   VAC
 
 import sys
 import time
@@ -17,8 +19,7 @@ from machine import Pin, I2C
 import pico_config as cfg
 from servo import PCA9685
 from temperature import TemperatureADC
-# for vacuum
-# from vacuum import VacuumADC
+from vacuum import VacuumADC
 
 # ============================================================
 # 設定
@@ -113,6 +114,21 @@ temperature_sensor = TemperatureADC(
     temp_max=cfg.TEMP_MAX_C,
     samples=cfg.TEMP_ADC_SAMPLES,
     delay_ms=cfg.TEMP_ADC_DELAY_MS,
+)
+
+# ============================================================
+# 真空ADC初期化 (ADS1015 A3, 温度と同じI2C0/同じADS1015)
+# ============================================================
+
+vacuum_sensor = VacuumADC(
+    i2c=i2c_ads,
+    address=cfg.ADS1015_ADDRESS,
+    config=cfg.VACUUM_CONFIG,
+    calib_a=cfg.CALIB_A,
+    calib_b=cfg.CALIB_B,
+    filament_off_v=cfg.VACUUM_FILAMENT_OFF_V,
+    samples=cfg.VACUUM_ADC_SAMPLES,
+    delay_ms=cfg.VACUUM_ADC_DELAY_MS,
 )
 
 
@@ -285,6 +301,27 @@ def read_temperature_once():
     )
 
 
+def read_vacuum_once():
+    raw, voltage, gauge_voltage, pressure = vacuum_sensor.read_all()
+
+    # voltage  : ADC入力(A3)の電圧 (補正前、再キャリブレーション用)
+    # gauge_v  : 補正後の真空計出力電圧
+    # pressure : フィラメントOFF時は OFF
+    if pressure is None:
+        pressure_text = "OFF"
+    else:
+        pressure_text = "{:.2e}".format(pressure)
+
+    print(
+        "DATA VAC raw={:.1f} voltage={:.4f} gauge_v={:.3f} pressure={}".format(
+            raw,
+            voltage,
+            gauge_voltage,
+            pressure_text,
+        )
+    )
+
+
 def process_command(command):
     """
     PCから受け取った1行のコマンドを処理する。
@@ -338,6 +375,8 @@ def process_command(command):
         elif operation == "READ" or operation == "TEMP":
             read_temperature_once()
 
+        elif operation == "VAC":
+            read_vacuum_once()
 
         elif operation == "RELEASE":
             release_servo()

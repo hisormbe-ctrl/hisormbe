@@ -15,6 +15,10 @@ ADS_I2C_SDA_PIN = 0
 ADS_I2C_SCL_PIN = 1
 ADS1015_ADDRESS = 0x48
 
+# for TempADC: A0, PGA ±4.096 V, single-shot, 1600 SPS
+# (main.py が参照しているが未定義だったため追加)
+TEMPERATURE_CONFIG = 0xC383
+
 # from themometer setting
 TEMP_V_MIN = 0.0
 TEMP_V_MAX = 1.0
@@ -28,9 +32,19 @@ TEMP_ADC_SAMPLES = 32
 TEMP_ADC_DELAY_MS = 2
 
 # for VacADC, I2C0
+# A3, PGA ±6.144 V (0.003 V/count), single-shot, 1600 SPS
 VACUUM_CONFIG = 0xF183 #A3
+
+# 1次関数キャリブレーション: gauge_v = CALIB_A * adc_v + CALIB_B
 CALIB_A = 4.778
 CALIB_B = 0.272
+
+# 真空計出力がこの電圧以上ならフィラメントOFF
+VACUUM_FILAMENT_OFF_V = 10.5
+
+# take average
+VACUUM_ADC_SAMPLES = 32
+VACUUM_ADC_DELAY_MS = 2
 
 # for PCA9685, I2C1
 PCA_I2C_ID = 1
@@ -70,7 +84,7 @@ SERVO_RELEASE_AFTER_MOVE = False
 # メインループの待ち時間。500 ms だとコマンド応答が最大0.5 s遅れる
 MAIN_LOOP_SLEEP_MS = 5
 
-# ADS1015 registers (temperature.py が参照)
+# ADS1015 registers (temperature.py / vacuum.py が参照)
 CONVERSION_REGISTER = 0x00
 CONFIG_REGISTER = 0x01
 

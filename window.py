@@ -306,10 +306,12 @@ class MainWindow(QMainWindow):
 
 
     def update_graph(self):
+        # pressure=OFF の行は plotter.load_csv 側で読み飛ばされる
         plotter.load_csv(
-            self.vacuum_graph,
-            self.csv_filepath,
-            value_column="Vacuum_Pa",
+            self.vac_graph,
+            self.logs.vac_log.file_path,
+            value_column="pressure",
+            time_column="timestamp",
         )
 
 # added for vac.
@@ -324,9 +326,12 @@ class MainWindow(QMainWindow):
 # plot.
         self.vac_graph = plotter.create_graph("Vacuum", "Pa")
         layout.addWidget(self.vac_graph)
-# graph update
-        self.plot_timer = QTimer(self)
-        self.plot_timer.timeout.connect(self.update_graph)
+        # 圧力は桁が大きく変わるので対数軸
+        self.vac_graph.setLogMode(y=True)
+# graph update: VacLogに1行記録されるたびに再描画
+        self.logs.vac_log.csv_written.connect(
+            lambda row: self.update_graph()
+        )
 
         self.vac_log_path_label = QLabel(
             f"VacLog: {self.logs.vac_log.file_path}\n"
