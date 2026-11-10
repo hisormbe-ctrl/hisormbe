@@ -230,6 +230,12 @@ def parse_vac_rx(message):
     return raw, voltage, gauge_v, pressure
 
 
+def make_log_directory_name(suffix="-logs"):
+    """起動時刻からログフォルダ名を作る。例: 20261110_092700-logs"""
+
+    return datetime.now().strftime("%Y%m%d_%H%M%S") + suffix
+
+
 class LogManager(QObject):
     csv_written = Signal(list)
 
@@ -237,12 +243,25 @@ class LogManager(QObject):
     temperature_received = Signal(float)   # temp_c [°C]
     vacuum_received = Signal(object)       # pressure [Pa]、フィラメントOFF時は None
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, output_directory=None):
         super().__init__(parent)
 
-        self.comm_log = CommLog(parent=self)
-        self.temp_log = TempLog(parent=self)
-        self.vac_log = VacLog(parent=self)
+        # 起動ごとに "YYYYmmdd_HHMMSS-logs" フォルダを作り、
+        # 3つのログをまとめてそこへ保存する。
+        if output_directory is None:
+            output_directory = make_log_directory_name()
+
+        self.output_directory = Path(output_directory)
+
+        self.comm_log = CommLog(
+            output_directory=self.output_directory, parent=self
+        )
+        self.temp_log = TempLog(
+            output_directory=self.output_directory, parent=self
+        )
+        self.vac_log = VacLog(
+            output_directory=self.output_directory, parent=self
+        )
 
         self.comm_log.csv_written.connect(self.csv_written.emit)
         self.temp_log.csv_written.connect(self.csv_written.emit)

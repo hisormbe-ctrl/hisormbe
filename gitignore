@@ -1,0 +1,14 @@
+# Pythonが生成するキャッシュ
+__pycache__/
+*.pyc
+
+# ローカルの仮想環境
+.venv/
+
+# autoMBEが生成するログ
+logs/
+
+# ローカルの環境変数ファイル
+.env
+# timestamped log folders
+*-logs/

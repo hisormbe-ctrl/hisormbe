@@ -4,6 +4,10 @@
 # Jun 2026.9.25
 #
 
+import sys
+from PySide6.QtWidgets import (
+    QApplication,    
+)
 import window as win
 from gauge_reader import find_camera_id
 
