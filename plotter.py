@@ -47,7 +47,11 @@ class TimeWindowPlot(pg.PlotWidget):
     直近 window_sec 秒分のデータだけを deque に保持して表示するグラフ。
 
     append() で1点ずつ追加し、時間枠より古い点は自動で捨てる。
-    横軸は時刻(時:分:秒)、表示幅は常に window_sec 秒に固定する。
+    横軸は時刻(時:分:秒)。
+
+    測定開始から window_sec に達するまでは通常の自動スケールで全点を表示し、
+    window_sec に達したら以降は横幅 window_sec の枠に固定して、
+    最新点を右端にスクロールする (古い点は deque から捨てる)。
     """
 
     def __init__(
@@ -69,13 +73,19 @@ class TimeWindowPlot(pg.PlotWidget):
         self.times = deque()    # epoch秒
         self.values = deque()
 
+        # 表示枠の左端の基準 (最初のデータの時刻)。未受信時は None。
+        self.start_time = None
+
         self.setLabel("bottom", "Time")
         self.setLabel("left", ylabel, units=unit)
         self.showGrid(x=True, y=True)
         self.setLogMode(y=log_y)
 
-        # 横軸は自前で固定するので自動調整は縦軸だけ
-        self.enableAutoRange(axis="x", enable=False)
+        # 軸の単位に m, μ などの接頭辞を自動で付けない (常に Pa, °C)
+        self.getAxis("left").enableAutoSIPrefix(False)
+
+        # 最初は通常のプロット (縦横とも自動スケール)
+        self.enableAutoRange(axis="x", enable=True)
         self.enableAutoRange(axis="y", enable=True)
 
         self.curve = self.plot(
@@ -86,8 +96,6 @@ class TimeWindowPlot(pg.PlotWidget):
             symbolSize=5,
         )
 
-        self._update_x_range(time.time())
-
     def set_window(self, window_sec):
         """表示する時間枠 [s] を変更する。"""
 
@@ -97,8 +105,11 @@ class TimeWindowPlot(pg.PlotWidget):
         self._redraw(latest)
 
     def clear_data(self):
+        """データを消し、次の点から新しく時間枠を始める。"""
+
         self.times.clear()
         self.values.clear()
+        self.start_time = None
         self._redraw(time.time())
 
     def append(self, timestamp, value):
@@ -119,6 +130,9 @@ class TimeWindowPlot(pg.PlotWidget):
         if self.log_y and v <= 0:
             return
 
+        if self.start_time is None:
+            self.start_time = t
+
         self.times.append(t)
         self.values.append(v)
 
@@ -134,8 +148,28 @@ class TimeWindowPlot(pg.PlotWidget):
             self.times.popleft()
             self.values.popleft()
 
+    @property
+    def is_window_full(self):
+        """測定開始から window_sec 以上経過していれば True。"""
+
+        if self.start_time is None or not self.times:
+            return False
+
+        return self.times[-1] - self.start_time >= self.window_sec
+
     def _update_x_range(self, latest):
-        self.setXRange(latest - self.window_sec, latest, padding=0)
+        """
+        横軸の表示範囲を決める。
+
+        window_sec 未満: 自動スケール (通常のプロット)
+        window_sec 以上: [最新 - window_sec, 最新] に固定してスクロール
+        """
+
+        if self.is_window_full:
+            # setXRange を呼ぶと横軸の自動スケールは自動的にOFFになる
+            self.setXRange(latest - self.window_sec, latest, padding=0)
+        else:
+            self.enableAutoRange(axis="x", enable=True)
 
     def _redraw(self, latest):
         self.curve.setData(list(self.times), list(self.values))
