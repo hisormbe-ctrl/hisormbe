@@ -3,9 +3,6 @@
 
 # Jun 2026.11.04
 
-SERIAL_BAUDRATE = 115200
-SERIAL_POLL_INTERVAL_MS = 20
-
 # standard sampling rate for Pico
 I2C_FREQUENCY = 400_000
 

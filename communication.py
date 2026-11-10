@@ -3,10 +3,8 @@
 
 # Jun 2026.10.22
 
-import sys,re
 import serial
 from serial.tools import list_ports
-import dataIO
 from PySide6.QtCore import QTimer
 import autombe_config as cfg
 
@@ -18,11 +16,6 @@ def initialize_serial(self):
         lambda: read_serial(self)
     )
 
-def get_serial_ports():
-    return [
-        (port.device, port.description)
-        for port in list_ports.comports()
-    ]
 
 # ========================================================
 # COMポート一覧

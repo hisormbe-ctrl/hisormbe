@@ -1,4 +1,8 @@
-from machine import I2C
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
+# Jun 2026.11.10
+
 import time
 import math
 
@@ -20,8 +24,8 @@ class PCA9685:
         self._write(0x00, 0x00)
 
     def freq(self, freq=None):
-        if freq is None:
-            return None
+            if freq is None:
+                        return None
 
         prescaleval = float(self.osc_hz)
         prescaleval /= 4096.0

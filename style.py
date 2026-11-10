@@ -69,6 +69,18 @@ def apply_style(self):
             font-weight: bold;
         }
 
+        QLabel#bigValue {
+            padding: 10px;
+            border: 1px solid #606060;
+            border-radius: 6px;
+            background-color: #15181d;
+            color: #00ccff;
+            font-size: 36px;
+            font-weight: bold;
+            font-family: Consolas, "Courier New", monospace;
+            qproperty-alignment: AlignCenter;
+        }
+
         QLabel#csvPath {
             color: #b5b5b5;
             font-size: 12px;

@@ -217,6 +217,30 @@ class MainWindow(QMainWindow):
         layout.addSpacing(20)
 #        self.add_hline(layout)
 
+        # ----- 現在値の大きな表示 -----
+        self.temp_value_label = QLabel("---- °C")
+        self.temp_value_label.setObjectName("bigValue")
+        self.vac_value_label = QLabel("---- Pa")
+        self.vac_value_label.setObjectName("bigValue")
+
+        value_grid = QGridLayout()
+        temp_caption = QLabel("温度")
+        temp_caption.setObjectName("sectionLabel")
+        vac_caption = QLabel("真空度")
+        vac_caption.setObjectName("sectionLabel")
+        value_grid.addWidget(temp_caption, 0, 0)
+        value_grid.addWidget(vac_caption, 0, 1)
+        value_grid.addWidget(self.temp_value_label, 1, 0)
+        value_grid.addWidget(self.vac_value_label, 1, 1)
+        value_grid.setColumnStretch(0, 1)
+        value_grid.setColumnStretch(1, 1)
+        layout.addLayout(value_grid)
+
+        self.logs.temperature_received.connect(self.update_temp_value)
+        self.logs.vacuum_received.connect(self.update_vac_value)
+
+        layout.addSpacing(20)
+
         self.comm_log_path_label = QLabel(
             f"CommLog: {self.logs.comm_log.file_path}\n"
         )
@@ -245,6 +269,18 @@ class MainWindow(QMainWindow):
         layout.addStretch()
 
         return tab
+
+
+    def update_temp_value(self, temp_c):
+        self.temp_value_label.setText(f"{temp_c:.1f} °C")
+
+
+    def update_vac_value(self, pressure):
+        if pressure is None:
+            # フィラメントOFF
+            self.vac_value_label.setText("OFF")
+        else:
+            self.vac_value_label.setText(f"{pressure:.2e} Pa")
 
 
     def on_csv_written(self, row, text_widget):

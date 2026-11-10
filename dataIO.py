@@ -233,6 +233,10 @@ def parse_vac_rx(message):
 class LogManager(QObject):
     csv_written = Signal(list)
 
+    # Picoから測定値を受信したときに通知する
+    temperature_received = Signal(float)   # temp_c [°C]
+    vacuum_received = Signal(object)       # pressure [Pa]、フィラメントOFF時は None
+
     def __init__(self, parent=None):
         super().__init__(parent)
 
@@ -259,6 +263,7 @@ class LogManager(QObject):
                     f"{temp_c:.2f}",
                     timestamp=row[0],
                 )
+                self.temperature_received.emit(temp_c)
 
             # 真空データのRXは、同じタイムスタンプでVacLogにも記録する。
             vac_values = parse_vac_rx(message)
@@ -272,6 +277,7 @@ class LogManager(QObject):
                     "OFF" if pressure is None else f"{pressure:.2e}",
                     timestamp=row[0],
                 )
+                self.vacuum_received.emit(pressure)
 
         return row
 
