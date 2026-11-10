@@ -50,6 +50,9 @@ class MainWindow(QMainWindow):
     # CAMERA_ID = 0
     GAUGE_MODEL_PATH = "7seg_svm_model.joblib"
 
+    # グラフに表示する時間枠 [s]
+    PLOT_WINDOW_SEC = 60 * 60   # 1時間
+
     def __init__(self, camera_id):
         super().__init__()
 
@@ -63,16 +66,6 @@ class MainWindow(QMainWindow):
 
         # Logger generate
         self.logs = LogManager(self)
-
-        # graph creation
-        self.logs.temp_log.csv_written.connect(
-            lambda row: plotter.load_csv(
-                self.temp_graph,
-                self.logs.temp_log.file_path,
-                "temp_c",
-                time_column="timestamp",
-            )
-        )        
 
         # servo tab, update status
         self.logs.comm_log.csv_written.connect(self.update_servo_status)
@@ -188,6 +181,35 @@ class MainWindow(QMainWindow):
 
 #        self.add_hline(layout)
 
+        layout.addWidget(QLabel("Thermmo Meter Shutter"))
+        self.start_button = QPushButton("START")
+        self.stop_button = QPushButton("STOP")
+        self.intervaltime = QLineEdit()
+        self.intervaltime.setText("1")
+        self.time_notice = QLabel("秒（1~600）")
+        validator = QIntValidator(1, 600, self.intervaltime)
+        self.intervaltime.setValidator(validator)
+        CYCLE_INTERVAL_TIME = int(self.intervaltime.text()) # integer.
+        hbox1 = QHBoxLayout()
+        hbox1.addWidget(self.start_button,1)
+        hbox1.addWidget(self.stop_button,1)
+        hbox1.addWidget(self.intervaltime,1)
+        hbox1.addWidget(self.time_notice,1)
+        layout.addLayout(hbox1)
+
+        self.start_button.clicked.connect(
+            lambda checked: (
+                self.iteration(self.intervaltime.text())
+                if self.intervaltime.hasAcceptableInput()
+                else None
+            )
+        )
+
+        self.stop_button.clicked.connect(self.stop_iteration)
+
+        layout.addSpacing(20)
+#        self.add_hline(layout)
+
         # ----- 現在値の大きな表示 -----
         self.temp_value_label = QLabel("---- °C")
         self.temp_value_label.setObjectName("bigValue")
@@ -275,40 +297,18 @@ class MainWindow(QMainWindow):
         label1 = QLabel("温度計則")
         layout.addWidget(label1)
 
-        layout.addWidget(QLabel("Thermmo Meter Shutter"))
-        self.start_button = QPushButton("START")
-        self.stop_button = QPushButton("STOP")
-        self.intervaltime = QLineEdit()
-        self.intervaltime.setText("1")
-        self.time_notice = QLabel("秒（1~600）")
-        validator = QIntValidator(1, 600, self.intervaltime)
-        self.intervaltime.setValidator(validator)
-        CYCLE_INTERVAL_TIME = int(self.intervaltime.text()) # integer.
-        hbox1 = QHBoxLayout()
-        hbox1.addWidget(self.start_button,1)
-        hbox1.addWidget(self.stop_button,1)
-        hbox1.addWidget(self.intervaltime,1)
-        hbox1.addWidget(self.time_notice,1)
-        layout.addLayout(hbox1)
-
-        self.start_button.clicked.connect(
-            lambda checked: (
-                self.iteration(self.intervaltime.text())
-                if self.intervaltime.hasAcceptableInput()
-                else None
-            )
-        )
-
-        self.stop_button.clicked.connect(self.stop_iteration)
-
-#        layout.addSpacing(20)
-
 # plot.
-        self.temp_graph = plotter.create_graph("Temperature", "°C")
+        self.temp_graph = plotter.TimeWindowPlot(
+            "Temperature",
+            "°C",
+            window_sec=self.PLOT_WINDOW_SEC,
+        )
         layout.addWidget(self.temp_graph)
 # graph update
-        # self.plot_timer = QTimer(self)
-        # self.plot_timer.timeout.connect(self.update_graph)
+        # TempLog の行: [timestamp, raw, voltage, temp_c]
+        self.logs.temp_log.csv_written.connect(
+            lambda row: self.temp_graph.append(row[0], row[3])
+        )
 
         self.temp_log_path_label = QLabel(
             f"TempLog: {self.logs.temp_log.file_path}\n"
@@ -339,15 +339,6 @@ class MainWindow(QMainWindow):
 
         return tab
 
-
-    def update_graph(self):
-        # pressure=OFF の行は plotter.load_csv 側で読み飛ばされる
-        plotter.load_csv(
-            self.vac_graph,
-            self.logs.vac_log.file_path,
-            value_column="pressure",
-            time_column="timestamp",
-        )
 
     def request_vacuum(self):
         # 未接続のときは送らない (ERRORログが毎回出るのを防ぐ)
@@ -417,18 +408,24 @@ class MainWindow(QMainWindow):
         self.vac_off_button.clicked.connect(self.stop_vacuum_cycle)
 
 # plot.
-        self.vac_graph = plotter.create_graph("Vacuum", "Pa")
-        layout.addWidget(self.vac_graph)
         # 圧力は桁が大きく変わるので対数軸
-        self.vac_graph.setLogMode(y=True)
+        self.vac_graph = plotter.TimeWindowPlot(
+            "Vacuum",
+            "Pa",
+            window_sec=self.PLOT_WINDOW_SEC,
+            log_y=True,
+        )
+        layout.addWidget(self.vac_graph)
 # graph update
         # ON押下で入力秒数ごとにPicoへ VAC を送る (OFFで停止)。
-        # 応答 DATA VAC が VacLog に記録されたらグラフを再描画する。
+        # 応答 DATA VAC が VacLog に記録されたらグラフへ1点追加する。
         self.plot_timer = QTimer(self)
         self.plot_timer.timeout.connect(self.request_vacuum)
 
+        # VacLog の行: [timestamp, raw, voltage, gauge_v, pressure]
+        # pressure=OFF の行は append() 側で読み飛ばされる
         self.logs.vac_log.csv_written.connect(
-            lambda row: self.update_graph()
+            lambda row: self.vac_graph.append(row[0], row[4])
         )
 
         self.vac_log_path_label = QLabel(
