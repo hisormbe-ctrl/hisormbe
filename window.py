@@ -188,35 +188,6 @@ class MainWindow(QMainWindow):
 
 #        self.add_hline(layout)
 
-        layout.addWidget(QLabel("Thermmo Meter Shutter"))
-        self.start_button = QPushButton("START")
-        self.stop_button = QPushButton("STOP")
-        self.intervaltime = QLineEdit()
-        self.intervaltime.setText("1")
-        self.time_notice = QLabel("秒（1~600）")
-        validator = QIntValidator(1, 600, self.intervaltime)
-        self.intervaltime.setValidator(validator)
-        CYCLE_INTERVAL_TIME = int(self.intervaltime.text()) # integer.
-        hbox1 = QHBoxLayout()
-        hbox1.addWidget(self.start_button,1)
-        hbox1.addWidget(self.stop_button,1)
-        hbox1.addWidget(self.intervaltime,1)
-        hbox1.addWidget(self.time_notice,1)
-        layout.addLayout(hbox1)
-
-        self.start_button.clicked.connect(
-            lambda checked: (
-                self.iteration(self.intervaltime.text())
-                if self.intervaltime.hasAcceptableInput()
-                else None
-            )
-        )
-
-        self.stop_button.clicked.connect(self.stop_iteration)
-
-        layout.addSpacing(20)
-#        self.add_hline(layout)
-
         # ----- 現在値の大きな表示 -----
         self.temp_value_label = QLabel("---- °C")
         self.temp_value_label.setObjectName("bigValue")
@@ -303,6 +274,34 @@ class MainWindow(QMainWindow):
         
         label1 = QLabel("温度計則")
         layout.addWidget(label1)
+
+        layout.addWidget(QLabel("Thermmo Meter Shutter"))
+        self.start_button = QPushButton("START")
+        self.stop_button = QPushButton("STOP")
+        self.intervaltime = QLineEdit()
+        self.intervaltime.setText("1")
+        self.time_notice = QLabel("秒（1~600）")
+        validator = QIntValidator(1, 600, self.intervaltime)
+        self.intervaltime.setValidator(validator)
+        CYCLE_INTERVAL_TIME = int(self.intervaltime.text()) # integer.
+        hbox1 = QHBoxLayout()
+        hbox1.addWidget(self.start_button,1)
+        hbox1.addWidget(self.stop_button,1)
+        hbox1.addWidget(self.intervaltime,1)
+        hbox1.addWidget(self.time_notice,1)
+        layout.addLayout(hbox1)
+
+        self.start_button.clicked.connect(
+            lambda checked: (
+                self.iteration(self.intervaltime.text())
+                if self.intervaltime.hasAcceptableInput()
+                else None
+            )
+        )
+
+        self.stop_button.clicked.connect(self.stop_iteration)
+
+#        layout.addSpacing(20)
 
 # plot.
         self.temp_graph = plotter.create_graph("Temperature", "°C")
