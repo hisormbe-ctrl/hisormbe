@@ -31,13 +31,10 @@ TEMP_ADC_DELAY_MS = 2
 # for VacADC, I2C0
 # A3, PGA ±6.144 V (0.003 V/count), single-shot, 1600 SPS
 VACUUM_CONFIG = 0xF183 #A3
-
-# 1次関数キャリブレーション: gauge_v = CALIB_A * adc_v + CALIB_B
-CALIB_A = 4.778
-CALIB_B = 0.272
-
+VAC_V_MIN = 0.0
+VAC_V_MAX = 10.9
 # 真空計出力がこの電圧以上ならフィラメントOFF
-VACUUM_FILAMENT_OFF_V = 10.5
+VACUUM_FILAMENT_OFF_V = 11.0
 
 # take average
 VACUUM_ADC_SAMPLES = 32
