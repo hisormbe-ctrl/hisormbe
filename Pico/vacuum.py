@@ -7,6 +7,18 @@
 import time
 import pico_config as cfg
 
+# ADS1015 PGA設定 (config bit 11:9) -> フルスケール電圧 [V]
+_PGA_FULL_SCALE = {
+    0: 6.144,
+    1: 4.096,
+    2: 2.048,
+    3: 1.024,
+    4: 0.512,
+    5: 0.256,
+    6: 0.256,
+    7: 0.256,
+}
+
 class VacuumADC:
 
     def __init__(
@@ -149,3 +161,4 @@ class VacuumADC:
         )
 
         return raw, voltage, gauge_voltage, pressure
+
